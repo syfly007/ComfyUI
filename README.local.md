@@ -17,7 +17,7 @@ journalctl --user -u comfyui.service       # 查看 systemd 层日志（一般�
 应用日志：
 
 ```bash
-tail -f /mnt/data/ComfyUI/comfyui.log
+tail -f /mnt/data/ComfyUI/user/comfyui.log
 ```
 
 ## 开机自启
@@ -56,6 +56,17 @@ loginctl show-user "$USER" --property=Linger  # 应显示 Linger=yes
 - 不用 `extra_model_paths.yaml` 做主目录：它只追加搜索路径，写死使用 `folder_paths.models_dir` 的插件读不到。
 - `extra_model_paths.yaml`（本地文件，已被 .gitignore 忽略）只用来追加额外的模型目录，里面有说明和示例。
 - 仓库自带的 `ComfyUI/models/` 保留原样，不存放模型。
+
+## Python 环境与依赖
+
+- 虚拟环境 `.venv` 由 uv 创建，解释器是仓库内的 `.uv-python/cpython-3.12.13`，**整个环境都在数据盘上，不依赖系统 Python**，重装系统后可以直接使用。
+- 2026-09-15 重装系统后检查：torch 2.14.0+cu130 能正常识别并使用 RTX 3090 Ti；`requirements.txt`、`manager_requirements.txt`、KJNodes 的依赖都满足。
+- MiniMaxH3_Director 缺少的依赖已补装（音频提取、分段导出 mp4、智能分镜功能要用）：
+  - `imageio-ffmpeg 0.6.0`：自带 ffmpeg 程序，系统里没有装 ffmpeg 也能用
+  - `platformdirs`
+  - `scenedetect 0.7.1`：**用 `--no-deps` 安装**。它的依赖声明要求 `opencv-python`（桌面版），和已装的 `opencv-python-headless` 都提供 `cv2`，装在一起会互相覆盖文件；而 0.6.x 版本又会把 `click` 从 8.5 降到 8.2（huggingface-hub 在用）
+  - 所以 `uv pip check` 会报一条 "scenedetect requires opencv-python"，这是预期的，功能正常
+- 检查依赖的方法：`uv pip check --python .venv/bin/python`，再加上对照 `requirements.txt` 和各插件目录下的 `requirements.txt`。
 
 ## Git 远程仓库
 
