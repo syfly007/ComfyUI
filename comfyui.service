@@ -1,0 +1,30 @@
+# ComfyUI 系统级 systemd 服务单元（源文件，受 git 管理）
+# 安装 / 更新：sudo bash /mnt/data/ComfyUI/install_comfyui_service.sh
+# 部署位置：/etc/systemd/system/comfyui.service（不要直接改那份，改这里再重新执行安装脚本）
+#
+# 为什么用系统级而不是 user 级（2026-09-15）：
+#   Ubuntu 的 systemd-oomd 会监控 user@<uid>.service，内存压力 >50% 持续 20s 就结束其中的进程；
+#   H3 这类大模型工作流曾因此被杀。系统级服务在 system.slice 下，不受 oomd 监控，只受内核 OOM 兜底。
+
+[Unit]
+Description=ComfyUI (/mnt/data/ComfyUI, port 8189)
+Documentation=file:///mnt/data/ComfyUI/README.local.md
+After=network-online.target
+Wants=network-online.target
+# /mnt/data 在 fstab 中是 nofail，等程序和模型库所在磁盘挂载后再启动
+RequiresMountsFor=/mnt/data/ComfyUI /mnt/data/ai_models/comfy
+
+[Service]
+Type=simple
+User=syfly007
+Group=syfly007
+# 启动参数（含 --models-directory、--disable-pinned-memory）只在脚本里维护，这里不重复定义
+ExecStart=/mnt/data/ComfyUI/start_comfyui.sh
+# 异常退出 30 秒后自动重启；systemctl stop 正常停止时不会重启
+Restart=on-failure
+RestartSec=30
+# 给正在执行的任务一点时间收尾，超时后强制结束
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

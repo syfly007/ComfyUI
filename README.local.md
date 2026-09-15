@@ -4,14 +4,16 @@
 
 ## 服务管理
 
-服务名：`comfyui.service`（systemd **--user** 单元，不是系统级 root 服务）
+服务名：`comfyui.service`，**系统级** systemd 单元，以 `syfly007` 用户运行（2026-09-15 由 user 级改为系统级，原因见下方"为什么是系统级服务"）。
+
+> ⚠️ **切换状态**：单元源文件和安装脚本已准备好，但**还没有执行切换**（执行时 ComfyUI 有任务在跑）。执行 `sudo bash /mnt/data/ComfyUI/install_comfyui_service.sh` 之前，实际运行的仍是旧的 user 级服务，要用 `systemctl --user ...` 管理。切换完成后请删掉这条提示。
 
 ```bash
-systemctl --user status comfyui.service    # 查看状态
-systemctl --user start comfyui.service     # 启动
-systemctl --user stop comfyui.service      # 停止（会释放 ComfyUI 占用的显存）
-systemctl --user restart comfyui.service   # 重启（改完 start_comfyui.sh 后用这个生效）
-journalctl --user -u comfyui.service -f    # 服务的标准输出（启动日志、报错栈）
+systemctl status comfyui.service           # 查看状态
+sudo systemctl start comfyui.service       # 启动
+sudo systemctl stop comfyui.service        # 停止（会释放 ComfyUI 占用的显存）
+sudo systemctl restart comfyui.service     # 重启（改完 start_comfyui.sh 后用这个生效）
+journalctl -u comfyui.service -f           # 服务的标准输出（启动日志、报错栈）
 ```
 
 应用日志：
@@ -20,54 +22,56 @@ journalctl --user -u comfyui.service -f    # 服务的标准输出（启动日�
 tail -f /mnt/data/ComfyUI/user/comfyui.log
 ```
 
-> 服务运行时不要再手动执行 `start_comfyui.sh`，否则会因为 8189 端口被占用而启动失败。需要前台调试时，先执行 `systemctl --user stop comfyui.service`。
+> 服务运行时不要再手动执行 `start_comfyui.sh`，否则会因为 8189 端口被占用而启动失败。需要前台调试时，先执行 `sudo systemctl stop comfyui.service`。
 
-### 单元文件
+### 单元文件与安装
 
-位置：`~/.config/systemd/user/comfyui.service`。它不在仓库里，**重装系统后需要按下面的内容重建**（2026-09-15 创建）：
-
-```ini
-[Unit]
-Description=ComfyUI (/mnt/data/ComfyUI, port 8189)
-Documentation=file:///mnt/data/ComfyUI/README.local.md
-
-[Service]
-Type=simple
-# 启动参数（含模型库路径 --models-directory）只在脚本里维护，这里不重复定义
-ExecStart=/mnt/data/ComfyUI/start_comfyui.sh
-# user 级服务无法依赖系统的挂载单元：开机时数据盘若还没挂好，脚本会失败退出，由这里自动重试
-Restart=on-failure
-RestartSec=30
-# 给正在执行的任务一点时间收尾，超时后强制结束
-TimeoutStopSec=60
-
-[Install]
-WantedBy=default.target
-```
-
-重建步骤（不需要 sudo）：
+| 文件 | 说明 |
+|---|---|
+| `/mnt/data/ComfyUI/comfyui.service` | **单元源文件，受 git 管理**。要改服务配置就改这份 |
+| `/mnt/data/ComfyUI/install_comfyui_service.sh` | 安装 / 更新脚本 |
+| `/etc/systemd/system/comfyui.service` | 部署后的副本，由安装脚本复制过去，**不要直接改** |
 
 ```bash
-mkdir -p ~/.config/systemd/user
-# 把上面的内容写入 ~/.config/systemd/user/comfyui.service
-systemctl --user daemon-reload
-systemctl --user enable --now comfyui.service
-loginctl enable-linger "$USER"
+sudo bash /mnt/data/ComfyUI/install_comfyui_service.sh
 ```
 
-- `Restart=on-failure`：进程异常退出（崩溃、被强制结束、开机时数据盘没挂好导致脚本失败）30 秒后自动重启。用 `systemctl --user stop` 正常停止时不会重启。2026-09-15 实测：`kill -9` 主进程后自动恢复。
-- 服务默认的 PATH 是 `/usr/local/bin:/usr/bin:/bin…`，Manager 需要的 `git`（`/usr/bin`）和 `uv`（`.venv/bin/uv`）都能找到，不需要额外配置环境变量。
+安装脚本会依次：
+1. **检查任务队列**：有任务在运行或排队、或者队列解析失败时，直接退出，不做任何改动（安装必然会重启 ComfyUI）。
+2. 如果还有旧的 user 级服务：停止并取消自启，单元文件改名为 `.disabled-<时间戳>`。
+3. 把源文件安装到 `/etc/systemd/system/`（内容有变化时先备份旧文件），`verify` → `daemon-reload` → `enable` → `restart`。
+4. 等待 HTTP 就绪，输出状态、开机自启、运行用户、HTTP 状态码。
+
+重装系统后也用这条命令恢复服务。修改了 `comfyui.service` 源文件后，同样重新执行这条命令。
+
+- `Restart=on-failure`：进程异常退出（崩溃、被强制结束、开机时数据盘没挂好导致脚本失败）30 秒后自动重启；`systemctl stop` 正常停止时不会重启。
+- `RequiresMountsFor=/mnt/data/ComfyUI /mnt/data/ai_models/comfy`：等数据盘挂载后再启动。
+- 系统服务默认的 PATH 是 `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`，Manager 需要的 `git`（`/usr/bin`）和 `uv`（`.venv/bin/uv`）都能找到。
+- `/dev/nvidia*` 权限为 666，以 syfly007 运行可以正常使用 GPU。
+
+### 为什么是系统级服务
+
+- Ubuntu 默认启用 systemd-oomd，它会监控 `user@1000.service`（该用户的所有 user 级服务和桌面程序）：**内存压力 > 50% 持续 20 秒就结束其中占内存最多的进程**。2026-09-15 H3 工作流就这样被结束过，见"故障记录"。
+- 系统级服务运行在 `system.slice` 下，**不在 oomd 的监控范围内**，只受内核 OOM 兜底（内存真正耗尽时才结束进程）。ollama 也是系统级服务，两者管理方式一致。
+- oomd 仍然保护桌面和其他 user 级程序，不需要关闭它，也不需要改系统默认阈值。
+- 确认 oomd 的监控范围：`oomctl`，"Memory Pressure Monitored CGroups" 下不应出现 `comfyui.service`。
+
+### 回滚到 user 级服务
+
+```bash
+sudo systemctl disable --now comfyui.service
+sudo rm /etc/systemd/system/comfyui.service && sudo systemctl daemon-reload
+mv ~/.config/systemd/user/comfyui.service.disabled-<时间戳> ~/.config/systemd/user/comfyui.service
+systemctl --user daemon-reload && systemctl --user enable --now comfyui.service
+```
 
 ## 开机自启
 
-已启用（2026-09-15 重装系统后重新配置）：
-
 ```bash
-systemctl --user is-enabled comfyui.service   # 应显示 enabled
-loginctl show-user "$USER" --property=Linger  # 应显示 Linger=yes
+systemctl is-enabled comfyui.service          # 应显示 enabled（系统级服务开机即启动，不需要登录，也不需要 linger）
 ```
 
-`loginctl enable-linger` 是关键一步——没有它的话，user 级 systemd 服务只有在用户登录（桌面或 SSH 会话）后才会启动；开了 linger 之后，哪怕没人登录，主机开机/重启后这个服务也会自动拉起。
+- 以前 user 级服务依赖 `loginctl enable-linger`（2026-09-15 开启过，`Linger=yes`）。换成系统级服务后已经不需要了，保留也没有影响。要关闭的话：`loginctl disable-linger syfly007`。
 
 ## 启动参数从哪来
 
@@ -80,7 +84,7 @@ loginctl show-user "$USER" --property=Linger  # 应显示 Linger=yes
 **这个脚本是启动参数的唯一来源**（局域网监听 `--listen 0.0.0.0`、性能调优 `--disable-comfy-compiler`、`PYTORCH_CUDA_ALLOC_CONF` 等都在里面）。它用 `exec` 直接把自己替换成 ComfyUI 进程，所以：
 
 - **手动兜底启动**：systemd 有问题时可以直接跑 `bash /mnt/data/ComfyUI/start_comfyui.sh`（前台运行，Ctrl+C 停止），效果和走 systemd 完全一致，用的是同一份参数。
-- **改参数**：改这个脚本，然后 `systemctl --user restart comfyui.service` 生效。一般不需要改 systemd unit 文件本身（`~/.config/systemd/user/comfyui.service`）。
+- **改参数**：改这个脚本，然后 `sudo systemctl restart comfyui.service` 生效。一般不需要改单元文件；真要改的话，改 `/mnt/data/ComfyUI/comfyui.service`，再执行安装脚本。
 
 ## 局域网访问
 
