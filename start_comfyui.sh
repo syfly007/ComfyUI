@@ -19,4 +19,5 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 cd /mnt/data/ComfyUI
 exec /mnt/data/ComfyUI/.venv/bin/python main.py \
   --listen 0.0.0.0 --port 8189 --disable-auto-launch \
-  --disable-comfy-compiler
+  --disable-comfy-compiler \
+  --enable-manager
