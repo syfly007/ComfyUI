@@ -110,6 +110,28 @@ loginctl show-user "$USER" --property=Linger  # 应显示 Linger=yes
   - 所以 `uv pip check` 会报一条 "scenedetect requires opencv-python"，这是预期的，功能正常
 - 检查依赖的方法：`uv pip check --python .venv/bin/python`，再加上对照 `requirements.txt` 和各插件目录下的 `requirements.txt`。
 
+## 故障记录
+
+### 2026-09-15 H3 工作流跑到采样阶段进程被杀、服务自动重启
+
+- **现象**：`minimax_h3_director_加速版_优化` 文生视频刚开始采样，ComfyUI 就突然消失，服务 30 秒后自动重启；htop 里多个核跑满。重装系统前在 20G 内存的虚拟机里能正常跑完。
+- **是谁结束的进程**：操作系统里的 **systemd-oomd**，不是 ComfyUI 自己崩溃。
+  - `journalctl -u systemd-oomd`：`Killed .../comfyui.service due to memory pressure ... being 85.51% > 50.00% for > 20s`
+  - `journalctl --user -u comfyui.service`：`code=killed, status=9/KILL`，`Failed with result 'oom-kill'`
+  - 内核日志里没有 OOM 记录，swap 只用了 0.5G：内存并没有真正耗尽，而是一直在回收，被判定为卡死
+  - Ubuntu 默认给 `user@.service` 设置了 `ManagedOOMMemoryPressure=kill`，阈值 50%、持续 20 秒（`/usr/lib/systemd/system/user@.service.d/10-oomd-user-service-defaults.conf`）
+- **根因**：ComfyUI 的锁页内存上限公式 `comfy/model_management.py:1604`：
+  `max(ram*0.4, min(ram*0.9, ram-4G, ram+swap-16G))`
+  - 本机 30G 内存 + 重装系统时自动创建的 16G `/swap.img` → 上限 **26G**（日志 `Enabled pinned memory 26661`）
+  - 20G 内存、没有 swap 的虚拟机 → 上限只有 8G
+  - 锁页内存不能回收。H3 要准备约 35G 模型（文本编码器 14956MB + 主模型 19995MB），通过 mmap 从**机械盘**读取，页缓存被挤到只剩几 G，系统只能不停地换出、再读回
+- **与上游代码无关**：`git fetch upstream` 拉下来的 32 个提交没有合并，运行的代码和 9 月 10 日一样。
+- **处理**：`start_comfyui.sh` 加 `--disable-pinned-memory`。
+- **验证（同一工作流、同样参数）**：
+  - 用户 cgroup 的内存压力（PSI）全程 0.00；可用内存始终在 23.7G 以上；页缓存最多 24.7G（可回收）
+  - 采样 20 步用时 1:26（4.30s/it），整个工作流 415 秒完成，没有被结束，服务没有重启
+- **以后如果还遇到类似问题**：先看 `journalctl -u systemd-oomd --since today | grep Killed`，确认是不是 oomd 结束的；再看启动日志里的 `Enabled pinned memory`，确认锁页内存有没有被重新打开。
+
 ## Git 远程仓库
 
 ```bash

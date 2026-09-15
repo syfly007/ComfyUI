@@ -19,8 +19,12 @@ export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 cd /mnt/data/ComfyUI
 # 模型库：/mnt/data/ai_models/comfy（2026-09 统一迁移）。必须用 --models-directory 指定：
 # 很多插件直接使用 folder_paths.models_dir，extra_model_paths.yaml 覆盖不到。
+# --disable-pinned-memory（2026-09-15）：锁页内存上限按 ram+swap 计算，本机 30G 内存 + 16G swap 时
+# 可达 26G 且不可回收，H3（约 35G 模型经 mmap 从机械盘读取）会严重抖动，被 systemd-oomd 按内存压力杀掉。
+# 关闭后同一工作流内存压力为 0，采样 4.3s/it 正常完成。详见 README.local.md「故障记录」。
 exec /mnt/data/ComfyUI/.venv/bin/python main.py \
   --listen 0.0.0.0 --port 8189 --disable-auto-launch \
   --disable-comfy-compiler \
   --models-directory /mnt/data/ai_models/comfy \
+  --disable-pinned-memory \
   --enable-manager
