@@ -50,7 +50,12 @@ loginctl show-user "$USER" --property=Linger  # 应显示 Linger=yes
 
 ## 模型路径
 
-共享模型库通过 `/mnt/data/ComfyUI/extra_model_paths.yaml` 映射到 `/mnt/data/aigo/hermes/data/comfy/models`，这是本地配置文件，`git pull` 不会覆盖，但更新仓库前建议先 `git status` 确认。
+主模型库：`/mnt/data/ai_models/comfy`，由 `start_comfyui.sh` 的 `--models-directory` 参数指定（2026-09 迁移）。
+
+- 不用软链接替换 `ComfyUI/models`：该目录下的占位文件受 git 管理，换成软链接后，官方一旦更新 `models/`，`git merge upstream/master` 就会中止。
+- 不用 `extra_model_paths.yaml` 做主目录：它只追加搜索路径，写死使用 `folder_paths.models_dir` 的插件读不到。
+- `extra_model_paths.yaml`（本地文件，已被 .gitignore 忽略）只用来追加额外的模型目录，里面有说明和示例。
+- 仓库自带的 `ComfyUI/models/` 保留原样，不存放模型。
 
 ## Git 远程仓库
 

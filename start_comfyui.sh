@@ -17,7 +17,10 @@ set -euo pipefail
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 
 cd /mnt/data/ComfyUI
+# 模型库：/mnt/data/ai_models/comfy（2026-09 统一迁移）。必须用 --models-directory 指定：
+# 很多插件直接使用 folder_paths.models_dir，extra_model_paths.yaml 覆盖不到。
 exec /mnt/data/ComfyUI/.venv/bin/python main.py \
   --listen 0.0.0.0 --port 8189 --disable-auto-launch \
   --disable-comfy-compiler \
+  --models-directory /mnt/data/ai_models/comfy \
   --enable-manager
