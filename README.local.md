@@ -6,7 +6,7 @@
 
 服务名：`comfyui.service`，**系统级** systemd 单元，以 `syfly007` 用户运行（2026-09-15 由 user 级改为系统级，原因见下方"为什么是系统级服务"）。
 
-> ⚠️ **切换状态**：单元源文件和安装脚本已准备好，但**还没有执行切换**（执行时 ComfyUI 有任务在跑）。执行 `sudo bash /mnt/data/ComfyUI/install_comfyui_service.sh` 之前，实际运行的仍是旧的 user 级服务，要用 `systemctl --user ...` 管理。切换完成后请删掉这条提示。
+> 2026-09-15 16:53 已完成切换并验证：服务运行在 `/system.slice/comfyui.service`，运行用户是 syfly007，oomd 的监控列表里已经没有它。旧的 user 级单元文件保留为 `~/.config/systemd/user/comfyui.service.disabled-20260915165341`。
 
 ```bash
 systemctl status comfyui.service           # 查看状态
