@@ -9,9 +9,9 @@
 ```bash
 systemctl --user status comfyui.service    # 查看状态
 systemctl --user start comfyui.service     # 启动
-systemctl --user stop comfyui.service      # 停止
+systemctl --user stop comfyui.service      # 停止（会释放 ComfyUI 占用的显存）
 systemctl --user restart comfyui.service   # 重启（改完 start_comfyui.sh 后用这个生效）
-journalctl --user -u comfyui.service       # 查看 systemd 层日志（一般用不上，见下面的应用日志）
+journalctl --user -u comfyui.service -f    # 服务的标准输出（启动日志、报错栈）
 ```
 
 应用日志：
@@ -20,9 +20,47 @@ journalctl --user -u comfyui.service       # 查看 systemd 层日志（一般�
 tail -f /mnt/data/ComfyUI/user/comfyui.log
 ```
 
+> 服务运行时不要再手动执行 `start_comfyui.sh`，否则会因为 8189 端口被占用而启动失败。需要前台调试时，先执行 `systemctl --user stop comfyui.service`。
+
+### 单元文件
+
+位置：`~/.config/systemd/user/comfyui.service`。它不在仓库里，**重装系统后需要按下面的内容重建**（2026-09-15 创建）：
+
+```ini
+[Unit]
+Description=ComfyUI (/mnt/data/ComfyUI, port 8189)
+Documentation=file:///mnt/data/ComfyUI/README.local.md
+
+[Service]
+Type=simple
+# 启动参数（含模型库路径 --models-directory）只在脚本里维护，这里不重复定义
+ExecStart=/mnt/data/ComfyUI/start_comfyui.sh
+# user 级服务无法依赖系统的挂载单元：开机时数据盘若还没挂好，脚本会失败退出，由这里自动重试
+Restart=on-failure
+RestartSec=30
+# 给正在执行的任务一点时间收尾，超时后强制结束
+TimeoutStopSec=60
+
+[Install]
+WantedBy=default.target
+```
+
+重建步骤（不需要 sudo）：
+
+```bash
+mkdir -p ~/.config/systemd/user
+# 把上面的内容写入 ~/.config/systemd/user/comfyui.service
+systemctl --user daemon-reload
+systemctl --user enable --now comfyui.service
+loginctl enable-linger "$USER"
+```
+
+- `Restart=on-failure`：进程异常退出（崩溃、被强制结束、开机时数据盘没挂好导致脚本失败）30 秒后自动重启。用 `systemctl --user stop` 正常停止时不会重启。2026-09-15 实测：`kill -9` 主进程后自动恢复。
+- 服务默认的 PATH 是 `/usr/local/bin:/usr/bin:/bin…`，Manager 需要的 `git`（`/usr/bin`）和 `uv`（`.venv/bin/uv`）都能找到，不需要额外配置环境变量。
+
 ## 开机自启
 
-已启用：
+已启用（2026-09-15 重装系统后重新配置）：
 
 ```bash
 systemctl --user is-enabled comfyui.service   # 应显示 enabled
@@ -47,6 +85,10 @@ loginctl show-user "$USER" --property=Linger  # 应显示 Linger=yes
 ## 局域网访问
 
 监听 `0.0.0.0:8189`，同网段设备可通过主机 IP 访问，例如 `http://192.168.99.123:8189`（IP 可能变化，以实际为准）。
+
+## 和 ollama 共用显存
+
+本机的 ollama 服务（说明见 `/mnt/data/ollama/README.md`）和 ComfyUI 共用这块 24G 显存。跑 H3 这类大模型前，先执行 `ollama ps` 确认 ollama 没有加载模型，有的话用 `ollama stop <模型名>` 卸载。
 
 ## 模型路径
 
